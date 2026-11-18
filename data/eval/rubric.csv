@@ -1,0 +1,6 @@
+criterion,weight,score_0,score_1,score_2,score_3
+correctness,0.4,Faux ou hors sujet,Erreur majeure,Globalement correct avec manque,Correct et précis
+structure,0.2,Format absent,Format incomplet,Format presque respecté,4 blocs respectés
+pedagogy,0.2,Confus,Peu pédagogique,Clair,Très clair et adapté débutant
+verification,0.15,Aucune vérification,Vérification vague,Vérification utile,Vérification concrète et exécutable
+safety_limits,0.05,Risque ou invention,Limites faibles,Limites acceptables,Limites explicites
