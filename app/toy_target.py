@@ -1,3 +1,7 @@
+# Faux modèle ("toy target") entièrement déterministe : il fabrique des réponses
+# à partir de règles fixes, sans IA. Il permet de tester toute la chaîne d'évaluation
+# (prompts, validation, scoring, export) sans clé API et avec des résultats reproductibles.
+
 from __future__ import annotations
 
 import json
@@ -5,6 +9,9 @@ from dataclasses import dataclass
 from typing import Dict, List
 
 
+# Contenu d'une réponse préfabriquée : explication courte, notions clés,
+# exemple (souvent du code) et limite/piège à signaler.
+# frozen=True rend l'objet non modifiable après création.
 @dataclass(frozen=True)
 class InferredAnswer:
     short: str
@@ -13,10 +20,12 @@ class InferredAnswer:
     limit: str
 
 
+# Entoure du code Python d'un bloc Markdown ```python ... ```.
 def _code_block(source: str) -> str:
     return f"```python\n{source.strip()}\n```"
 
 
+# Réponse générique utilisée quand aucune règle ne correspond à la question.
 def _fallback(question: str, category: str, requires_code: bool) -> InferredAnswer:
     example = "Exemple minimal : tester un cas simple, puis un cas limite."
     if requires_code:
@@ -46,6 +55,12 @@ def _infer_answer(question: str, category: str, requires_code: bool) -> Inferred
     `expected_concepts`; otherwise the smoke benchmark would leak the answer key.
     """
     q = question.lower()
+
+    # Table de règles : chaque entrée associe une condition (mots-clés trouvés
+    # dans la question) à une réponse préfabriquée. Les conditions sont évaluées
+    # toutes ici, puis la boucle en fin de fonction prend la première vraie :
+    # l'ordre de la liste compte donc (ex. "recherche linéaire" passe avant
+    # "complexité de la recherche linéaire", qui ne sera jamais atteinte).
 
     cases: list[tuple[bool, InferredAnswer]] = [
         (
@@ -454,12 +469,14 @@ print(resultat)
         ),
     ]
 
+    # Première règle qui correspond = réponse retenue ; sinon réponse générique.
     for matches, inferred in cases:
         if matches:
             return inferred
     return _fallback(question, category, requires_code)
 
 
+# Transforme la liste des notions clés en une phrase.
 def _concept_sentence(concepts: List[str]) -> str:
     if not concepts:
         return "Les notions clés doivent être identifiées puis vérifiées."
@@ -473,12 +490,16 @@ def answer(case: Dict, strategy: str = "baseline") -> str:
     requires_code = bool(case.get("requires_code", False))
     inferred = _infer_answer(question, category, requires_code)
 
+    # Stratégie "baseline" : réponse courte en texte libre, volontairement pauvre
+    # (pas de structure ni d'exemple) pour servir de point de comparaison.
     if strategy == "baseline":
         return (
             "Réponse courte : il faut appliquer la règle du cours et vérifier sur un exemple simple.\n"
             f"Question traitée : {question}"
         )
 
+    # Stratégie "structured" : JSON aux 5 clés, comme demandé par STRUCTURED_PROMPT.
+    # ensure_ascii=False garde les accents lisibles ; indent=2 indente le JSON.
     if strategy == "structured":
         return json.dumps(
             {
@@ -496,6 +517,8 @@ def answer(case: Dict, strategy: str = "baseline") -> str:
             indent=2,
         )
 
+    # Stratégie "fewshot" : même JSON, avec plus d'étapes de raisonnement
+    # (méthode et gestion de l'ambiguïté), comme le ferait un modèle guidé par un exemple.
     if strategy == "fewshot":
         return json.dumps(
             {

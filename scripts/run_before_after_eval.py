@@ -1,3 +1,9 @@
+# Évaluation "avant/après" : fait répondre le modèle aux 45 questions avec
+# chacune des 3 stratégies de prompt, note chaque réponse, puis exporte
+# un CSV détaillé, un rapport Markdown et un fichier de métadonnées.
+# Sans GROQ_API_KEY, utilise le faux modèle déterministe (toy target).
+# Lancement : make eval
+
 from __future__ import annotations
 
 import csv
@@ -8,6 +14,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+# Rend le paquet "app" importable quand le script est lancé directement.
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -16,6 +23,7 @@ from app import toy_target
 from app.assistant_core import heuristic_score, validate_four_block_response
 from app.prompts import PROMPTS
 
+# Dossier de sortie : ASSISTANT_OUTPUT_DIR si définie, sinon outputs/local.
 CATALOG = ROOT / "data" / "eval" / "test_catalog.jsonl"
 _output_env = os.environ.get("ASSISTANT_OUTPUT_DIR")
 OUTPUTS = Path(_output_env).expanduser() if _output_env else ROOT / "outputs" / "local"
@@ -25,6 +33,7 @@ if not OUTPUTS.is_absolute():
 STRATEGIES = ["baseline", "structured", "fewshot"]
 
 
+# Lit le catalogue : une question JSON par ligne (format JSONL), lignes vides ignorées.
 def load_cases():
     with CATALOG.open("r", encoding="utf-8") as f:
         return [json.loads(line) for line in f if line.strip()]
@@ -41,6 +50,8 @@ def _make_answerer(strategy: str):
         client = GroqModelClient(strategy=strategy)
         prompt_template = PROMPTS[strategy]
 
+# Fonction imbriquée : elle garde accès à client et prompt_template
+# (fermeture), ce qui évite de les recréer à chaque question.
         def _groq_answer(case: dict) -> str:
             prompt = prompt_template.replace("{question}", case["question"])
             time.sleep(1)  # respect Groq rate limit
@@ -48,16 +59,20 @@ def _make_answerer(strategy: str):
 
         return _groq_answer
 
+# Pas de clé API : on répond avec le faux modèle.
     return lambda case: toy_target.answer(case, strategy=strategy)
 
 
+# Fait passer toutes les questions pour une stratégie et renvoie une ligne de résultats par question.
 def run_strategy(cases, strategy: str):
     answerer = _make_answerer(strategy)
     rows = []
     for case in cases:
+# Mesure du temps de réponse en millisecondes.
         start = time.perf_counter()
         response = answerer(case)
         latency_ms = int((time.perf_counter() - start) * 1000)
+# Vérification du format puis calcul des scores (voir app/assistant_core.py).
         validation = validate_four_block_response(response)
         score = heuristic_score(response, case.get("expected_concepts", []), bool(case.get("requires_code", False)))
         rows.append({
@@ -70,13 +85,16 @@ def run_strategy(cases, strategy: str):
             "valid_format": int(validation.valid),
             "missing_sections": ";".join(validation.missing_sections),
             "latency_ms": latency_ms,
+# Ajoute les 6 scores (5 critères + overall) comme colonnes.
             **score,
             "question": case["question"],
+# Les retours à la ligne sont remplacés par "\n" pour garder une réponse par ligne de CSV.
             "response_text": response.replace("\n", "\\n"),
         })
     return rows
 
 
+# Écrit les lignes dans un CSV ; les noms de colonnes sont pris sur la première ligne.
 def write_csv(path: Path, rows):
     if not rows:
         return
@@ -86,7 +104,9 @@ def write_csv(path: Path, rows):
         writer.writerows(rows)
 
 
+# Construit le rapport Markdown : moyennes par stratégie, puis par split (dev/test...).
 def summarize(rows):
+# Regroupe les lignes par stratégie.
     by_strategy = {}
     for row in rows:
         s = row["strategy"]
@@ -110,6 +130,7 @@ def summarize(rows):
     lines.append("")
     lines.append("| Split | Stratégie | N | Score moyen |")
     lines.append("|---|---|---:|---:|")
+# Toutes les combinaisons (split, stratégie) présentes, triées.
     split_keys = sorted({(row["split"], row["strategy"]) for row in rows})
     for split, strategy in split_keys:
         items = [row for row in rows if row["split"] == split and row["strategy"] == strategy]
@@ -127,6 +148,7 @@ def summarize(rows):
     return "\n".join(lines)
 
 
+# Enchaîne : chargement des questions, évaluation des 3 stratégies, écriture des 3 fichiers.
 def main():
     OUTPUTS.mkdir(parents=True, exist_ok=True)
     cases = load_cases()
@@ -138,6 +160,7 @@ def main():
     write_csv(out_csv, all_rows)
     report = summarize(all_rows)
     (OUTPUTS / "before_after_eval_report.md").write_text(report, encoding="utf-8")
+# Métadonnées pour savoir plus tard comment le résultat a été produit (date, cible, catalogue).
     metadata = {
         "created_at": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
         "catalog": str(CATALOG.relative_to(ROOT)),

@@ -1,3 +1,7 @@
+# Smoke test : vérification rapide que le dépôt fonctionne de bout en bout.
+# C'est ce script que lance la CI GitHub Actions (.github/workflows/smoke.yml).
+# Lancement : make smoke
+
 from __future__ import annotations
 
 import os
@@ -7,9 +11,12 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+# Dossiers dont on vérifie la syntaxe (ceux qui n'existent pas sont ignorés).
 PYTHON_DIRS = ("app", "scripts", "tests", "grpo_bonus", "pyrit", "promptfoo")
 
 
+# Trois étapes : 1) syntaxe, 2) tests unitaires, 3) évaluation complète
+# dans un dossier temporaire (supprimé automatiquement à la fin).
 def main() -> None:
     compile_python_sources()
     run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"])
@@ -24,6 +31,8 @@ def main() -> None:
     print("Smoke OK: syntax, tests, deterministic evaluation, output export.", flush=True)
 
 
+# Compile chaque fichier .py sans l'exécuter, pour détecter les erreurs de syntaxe.
+# Toutes les erreurs sont listées avant d'arrêter avec le code de sortie 1.
 def compile_python_sources() -> None:
     failures: list[str] = []
     for directory in PYTHON_DIRS:
@@ -43,6 +52,8 @@ def compile_python_sources() -> None:
         raise SystemExit(1)
 
 
+# Lance une commande dans un sous-processus depuis la racine du dépôt.
+# check=True : si la commande échoue, une exception arrête le smoke test.
 def run(command: list[str], env: dict[str, str] | None = None) -> None:
     merged_env = os.environ.copy()
     merged_env["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -53,6 +64,7 @@ def run(command: list[str], env: dict[str, str] | None = None) -> None:
     subprocess.run(command, cwd=ROOT, env=merged_env, check=True)
 
 
+# Vérifie que l'évaluation a bien produit ses 3 fichiers.
 def assert_eval_outputs(output_dir: Path) -> None:
     required = [
         "before_after_eval_results.csv",
