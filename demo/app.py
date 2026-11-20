@@ -2,6 +2,9 @@
 Assistant Pédagogique RL/GRPO — ESIEE Paris 2025/2026
 Déploiement Hugging Face Spaces (Gradio)
 """
+# Version autonome de la démo, prévue pour Hugging Face Spaces : elle n'importe rien
+# du dossier app/ (prompts recopiés ici) pour pouvoir être déployée seule avec demo/data/.
+
 import html as html_lib
 import json
 import os
@@ -12,8 +15,10 @@ from pathlib import Path
 import gradio as gr
 import requests
 
+# Sur Hugging Face, la clé est fournie par un "secret" du Space (variable d'environnement).
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 
+# Catalogue des questions ; si le fichier est absent, la démo démarre quand même (liste vide).
 CATALOG_PATH = Path(__file__).parent / "data" / "test_catalog.jsonl"
 CASES = []
 if CATALOG_PATH.exists():
@@ -21,6 +26,8 @@ if CATALOG_PATH.exists():
         CASES = [json.loads(line) for line in f if line.strip()]
 QUESTION_MAP = {f"{c['id']} — {c['question'][:70]}": c for c in CASES}
 
+# Schéma JSON et prompts des 3 stratégies. Différence avec app/prompts.py :
+# ici l'assistant est présenté comme spécialisé en cybersécurité.
 _SCHEMA = """{
   "reformulation": "Reformulation concise de la demande",
   "reasoning_steps": ["étape 1", "étape 2", "étape 3"],
@@ -71,6 +78,7 @@ PROMPTS = {
     ),
 }
 
+# Libellés affichés pour chaque stratégie, et dictionnaire inverse libellé → nom interne.
 STRATEGY_LABELS = {
     "baseline":   "Ligne de base — texte libre",
     "structured": "Structuré — JSON strict (recommandé)",
@@ -234,6 +242,8 @@ EMPTY_STATE = """
 
 # ─── Groq ─────────────────────────────────────────────────────────────────────
 
+# Appel à l'API Groq avec nouvelles tentatives (attente croissante si limite de débit 429).
+# Sans clé, renvoie le marqueur "ERROR_NO_KEY" que format_response() transforme en message d'aide.
 def call_groq(prompt: str, max_retries: int = 3) -> str:
     if not GROQ_API_KEY:
         return "ERROR_NO_KEY"
@@ -267,6 +277,8 @@ def call_groq(prompt: str, max_retries: int = 3) -> str:
 
 # ─── HTML builders ─────────────────────────────────────────────────────────────
 
+# Un bloc HTML coloré par section de la réponse JSON.
+# html_lib.escape() empêche le modèle d'injecter du HTML/JavaScript dans la page.
 def _sections_html(data: dict) -> str:
     parts = []
     if val := data.get("reformulation"):
@@ -298,6 +310,7 @@ def _sections_html(data: dict) -> str:
     return "".join(parts)
 
 
+# Assemble la bulle de la question et la réponse de l'assistant.
 def _chat_html(question: str, content: str, badge: str) -> str:
     q = html_lib.escape(question)
     return (
@@ -312,6 +325,8 @@ def _chat_html(question: str, content: str, badge: str) -> str:
     )
 
 
+# Choisit l'affichage : message d'erreur si la clé manque, sections si la réponse
+# est du JSON (brut ou dans un bloc ```json), sinon texte libre.
 def format_response(raw: str, question: str) -> str:
     if raw == "ERROR_NO_KEY":
         return (
@@ -348,6 +363,8 @@ def format_response(raw: str, question: str) -> str:
     return _chat_html(question, content, badge)
 
 
+# Appelée au clic sur "Envoyer" : question du catalogue ou saisie libre,
+# prompt de la stratégie choisie, appel au modèle, mise en forme.
 def respond(question_input: str, strategy: str, use_catalog: bool, catalog_choice: str) -> str:
     if use_catalog and catalog_choice and catalog_choice in QUESTION_MAP:
         question = QUESTION_MAP[catalog_choice]["question"]
@@ -402,6 +419,8 @@ with gr.Blocks(title="Assistant Pédagogique — ESIEE Paris") as demo:
         with gr.Column(scale=2, elem_id="panel-response"):
             output = gr.HTML(value=EMPTY_STATE)
 
+# La case à cocher affiche/masque la liste du catalogue ;
+# le bouton déclenche respond() avec les valeurs des champs.
     use_catalog.change(fn=lambda v: gr.update(visible=v), inputs=use_catalog, outputs=catalog_choice)
     btn.click(respond, inputs=[question_input, strategy, use_catalog, catalog_choice], outputs=[output])
 

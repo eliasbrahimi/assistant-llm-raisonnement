@@ -1,3 +1,6 @@
+# Tests "contrat" du dépôt : fichiers obligatoires, format du catalogue,
+# comportement du faux modèle, validateur, schéma SQL et script d'évaluation.
+
 from __future__ import annotations
 
 import csv
@@ -18,6 +21,7 @@ from app.toy_target import answer
 
 
 class SmokeContractTest(unittest.TestCase):
+# Tous les fichiers attendus dans le rendu doivent exister.
     def test_required_student_files_exist(self) -> None:
         required = [
             "README.md",
@@ -45,6 +49,7 @@ class SmokeContractTest(unittest.TestCase):
         missing = [path for path in required if not (ROOT / path).exists()]
         self.assertEqual(missing, [])
 
+# Aucun fichier Word ou Excel ne doit traîner à la racine du dépôt.
     def test_no_root_office_exports_in_student_repo(self) -> None:
         office_exports = sorted(
             path.name
@@ -53,6 +58,8 @@ class SmokeContractTest(unittest.TestCase):
         )
         self.assertEqual(office_exports, [])
 
+# Le catalogue doit avoir au moins 30 questions, des id uniques,
+# au moins 5 questions de test, et tous les champs avec le bon type.
     def test_catalog_jsonl_contract(self) -> None:
         rows = _load_jsonl(ROOT / "data" / "eval" / "test_catalog.jsonl")
         self.assertGreaterEqual(len(rows), 30)
@@ -79,12 +86,15 @@ class SmokeContractTest(unittest.TestCase):
             self.assertIsInstance(row["requires_code"], bool, row["id"])
             self.assertTrue(row["question"].strip(), row["id"])
 
+# Les versions CSV et JSONL du catalogue doivent contenir les mêmes questions.
     def test_catalog_csv_matches_jsonl_ids(self) -> None:
         jsonl_ids = {row["id"] for row in _load_jsonl(ROOT / "data" / "eval" / "test_catalog.jsonl")}
         with (ROOT / "data" / "eval" / "test_catalog.csv").open(encoding="utf-8", newline="") as f:
             csv_ids = {row["id"] for row in csv.DictReader(f)}
         self.assertEqual(csv_ids, jsonl_ids)
 
+# Sur le faux modèle, l'ordre attendu des scores moyens doit être respecté :
+# baseline < structured ≤ fewshot. Vérifie que le scoring distingue bien les stratégies.
     def test_toy_target_strategy_ordering(self) -> None:
         rows = _load_jsonl(ROOT / "data" / "eval" / "test_catalog.jsonl")
         averages: dict[str, float] = {}
@@ -99,6 +109,8 @@ class SmokeContractTest(unittest.TestCase):
         self.assertLess(averages["baseline"], averages["structured"])
         self.assertGreaterEqual(averages["fewshot"], averages["structured"])
 
+# Le faux modèle ne doit pas tricher en lisant la réponse attendue :
+# on remplace celle-ci par un marqueur "POISON" qui ne doit jamais apparaître dans la réponse.
     def test_toy_target_does_not_read_answer_key(self) -> None:
         case = _load_jsonl(ROOT / "data" / "eval" / "test_catalog.jsonl")[0]
         poisoned = dict(case)
@@ -110,6 +122,7 @@ class SmokeContractTest(unittest.TestCase):
         self.assertNotIn("POISON_REFERENCE_SHOULD_NOT_APPEAR", response)
         self.assertNotIn("POISON_CONCEPT_SHOULD_NOT_APPEAR", response)
 
+# Une réponse "structured" doit être un JSON valide avec les 5 clés.
     def test_structured_response_contract(self) -> None:
         case = _load_jsonl(ROOT / "data" / "eval" / "test_catalog.jsonl")[0]
         response = answer(case, strategy="structured")
@@ -119,11 +132,15 @@ class SmokeContractTest(unittest.TestCase):
         for field in ("reformulation", "reasoning_steps", "example", "verification", "limitations"):
             self.assertIn(field, payload)
 
+# Citer les noms des sections dans une phrase ne suffit pas :
+# il faut de vrais titres sur des lignes séparées.
     def test_four_block_validator_rejects_loose_substrings(self) -> None:
         invalid = "Reformulation, exemple, raisonnement structuré, limites et vérification."
         validation = validate_four_block_response(invalid)
         self.assertFalse(validation.valid)
 
+# Le schéma SQL doit s'exécuter sans erreur et créer les tables principales
+# (base en mémoire, rien n'est écrit sur le disque).
     def test_schema_loads_in_memory(self) -> None:
         schema = (ROOT / "db" / "schema.sql").read_text(encoding="utf-8")
         with sqlite3.connect(":memory:") as con:
@@ -136,6 +153,7 @@ class SmokeContractTest(unittest.TestCase):
         self.assertIn("answers", tables)
         self.assertIn("scores", tables)
 
+# Les résultats générés doivent aller dans outputs/local/, pas directement dans outputs/.
     def test_no_generated_outputs_at_top_level(self) -> None:
         top_level = [
             path.name
@@ -144,6 +162,8 @@ class SmokeContractTest(unittest.TestCase):
         ]
         self.assertEqual(top_level, ["README.md"])
 
+# Le script d'évaluation doit écrire ses 3 fichiers dans le dossier indiqué
+# par ASSISTANT_OUTPUT_DIR.
     def test_runner_cli_writes_to_requested_output_dir(self) -> None:
         with _temporary_output_dir() as output_dir:
             env = os.environ.copy()
@@ -161,11 +181,14 @@ class SmokeContractTest(unittest.TestCase):
             self.assertTrue((output_dir / "metadata.json").exists())
 
 
+# Lit un fichier JSONL (un objet JSON par ligne).
 def _load_jsonl(path: Path) -> list[dict]:
     with path.open(encoding="utf-8") as f:
         return [json.loads(line) for line in f if line.strip()]
 
 
+# Gestionnaire de contexte (utilisable avec "with") qui crée un dossier temporaire
+# et le supprime à la sortie du bloc.
 class _temporary_output_dir:
     def __enter__(self) -> Path:
         import tempfile

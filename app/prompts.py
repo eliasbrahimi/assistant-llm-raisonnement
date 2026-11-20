@@ -1,3 +1,9 @@
+# Les 3 stratégies de prompting comparées dans le projet.
+# {question} est remplacé par la question de l'étudiant avec .replace("{question}", ...).
+# On n'utilise pas .format() : les accolades du schéma JSON seraient prises pour des champs.
+
+# Schéma JSON imposé au modèle dans les prompts "structured" et "fewshot".
+# Ses clés correspondent à JSON_REQUIRED_KEYS dans assistant_core.py.
 _JSON_SCHEMA = """{
   "reformulation": "Reformulation concise de la demande",
   "reasoning_steps": ["étape 1", "étape 2", "étape 3"],
@@ -6,12 +12,15 @@ _JSON_SCHEMA = """{
   "limitations": "Limites, hypothèses ou incertitudes"
 }"""
 
+# Prompt de référence (baseline) : aucune consigne de format.
 BASELINE_PROMPT = """Tu es un assistant utile. Réponds clairement à la question de l'étudiant.
 
 Question:
 {question}
 """
 
+# Prompt structuré : rôle précis, format JSON obligatoire et règles pour chaque clé
+# (zero-shot : aucun exemple de réponse n'est donné).
 STRUCTURED_PROMPT = (
     "Tu es un assistant pédagogique spécialisé en programmation Python et algorithmique pour étudiants débutants.\n\n"
     "Réponds UNIQUEMENT avec un objet JSON valide respectant exactement ce schéma :\n"
@@ -32,6 +41,8 @@ Question :
 """
 )
 
+# Prompt few-shot : mêmes consignes, plus un exemple complet question → réponse JSON
+# pour montrer au modèle le niveau de détail attendu.
 FEWSHOT_PROMPT = (
     "Tu es un assistant pédagogique spécialisé en programmation Python et algorithmique pour étudiants débutants.\n\n"
     "Réponds UNIQUEMENT avec un objet JSON valide respectant exactement ce schéma :\n"
@@ -59,6 +70,7 @@ Nouvelle question :
 """
 )
 
+# Dictionnaire nom de stratégie → prompt, utilisé par les scripts d'évaluation.
 PROMPTS = {
     "baseline": BASELINE_PROMPT,
     "structured": STRUCTURED_PROMPT,

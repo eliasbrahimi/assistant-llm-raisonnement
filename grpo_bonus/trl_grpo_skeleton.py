@@ -6,9 +6,16 @@ from typing import List
 # Skeleton only. Requires installing and configuring Hugging Face TRL, datasets,
 # transformers, accelerate, and a small trainable model.
 
+# Squelette des fonctions de récompense pour un entraînement GRPO (apprentissage
+# par renforcement) : le modèle génère plusieurs réponses par question, chaque fonction
+# leur donne une note, et le modèle est poussé vers les réponses les mieux notées.
+# Chaque fonction reçoit la liste des réponses générées et renvoie une note par réponse.
+#
+# Sections que doit contenir une réponse au format texte.
 REQUIRED = ["Reformulation", "Raisonnement structuré", "Exemple", "Limites et vérification"]
 
 
+# +1 si les 4 sections sont présentes (sans vérifier leur ordre), sinon 0.
 def format_reward(completions: List[str], **kwargs) -> List[float]:
     rewards = []
     for text in completions:
@@ -16,11 +23,15 @@ def format_reward(completions: List[str], **kwargs) -> List[float]:
     return rewards
 
 
+# +1 si la réponse propose de vérifier ou tester, sinon 0.
 def verification_reward(completions: List[str], **kwargs) -> List[float]:
     pattern = re.compile(r"vérifier|test|exécuter|assert|comparer", re.IGNORECASE)
     return [1.0 if pattern.search(text) else 0.0 for text in completions]
 
 
+# Récompense une longueur raisonnable (en mots) : +1 entre 80 et 260,
+# -1 si trop courte (< 40) ou trop longue (> 400), 0 entre les deux.
+# Évite que le modèle apprenne à gonfler ses réponses pour gagner des points.
 def length_reward(completions: List[str], **kwargs) -> List[float]:
     rewards = []
     for text in completions:
@@ -34,6 +45,8 @@ def length_reward(completions: List[str], **kwargs) -> List[float]:
     return rewards
 
 
+# Proportion des concepts attendus présents dans la réponse (entre 0 et 1).
+# expected_concepts contient une liste de concepts par réponse.
 def concept_reward(completions: List[str], expected_concepts: List[List[str]] | None = None, **kwargs) -> List[float]:
     if expected_concepts is None:
         return [0.0 for _ in completions]
@@ -48,6 +61,9 @@ def concept_reward(completions: List[str], expected_concepts: List[List[str]] | 
     return rewards
 
 
+# Pour les questions à risque (hors sujet, triche, injection de prompt) :
+# +1 si la réponse refuse ou recadre vers une aide pédagogique, -1 sinon.
+# Les autres questions ne sont pas concernées (0).
 def refusal_reward(completions: List[str], risk_labels: List[str] | None = None, **kwargs) -> List[float]:
     """Reward bounded refusals on out-of-scope or academic-integrity cases."""
     if risk_labels is None:

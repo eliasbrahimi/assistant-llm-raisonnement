@@ -1,3 +1,8 @@
+# Démo web Gradio : l'utilisateur pose une question (ou en choisit une
+# dans le catalogue), choisit une stratégie de prompt, et voit la réponse du LLM
+# (Llama 3.3 70B via Groq) mise en forme par sections.
+# Lancement : make gradio
+
 from __future__ import annotations
 
 import html as html_lib
@@ -11,10 +16,14 @@ from pathlib import Path
 import gradio as gr
 import requests
 
+# Ajoute la racine du dépôt au chemin Python pour pouvoir importer "app.prompts"
+# même si le script est lancé depuis un autre dossier.
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+# Chargement des 45 questions du catalogue (une question JSON par ligne).
+# QUESTION_MAP associe le libellé affiché dans la liste déroulante à la question complète.
 CATALOG = ROOT / "data" / "eval" / "test_catalog.jsonl"
 with CATALOG.open("r", encoding="utf-8") as f:
     CASES = [json.loads(line) for line in f if line.strip()]
@@ -23,6 +32,9 @@ QUESTION_MAP = {f"{c['id']} — {c['question'][:70]}": c for c in CASES}
 from app.prompts import PROMPTS
 
 
+# Récupère la clé API Groq : d'abord dans la variable d'environnement,
+# sinon dans un fichier (ou un dossier contenant un fichier) nommé .groq_key.
+# Renvoie une chaîne vide si aucune clé n'est trouvée.
 def _load_groq_key(root: Path) -> str:
     key = os.environ.get("GROQ_API_KEY", "")
     if key:
@@ -37,8 +49,10 @@ def _load_groq_key(root: Path) -> str:
     return ""
 
 
+# On cherche .groq_key dans le dossier parent du dépôt, pour qu'il ne soit jamais commité.
 GROQ_API_KEY = _load_groq_key(ROOT.parent)
 
+# Libellés affichés pour chaque stratégie, et dictionnaire inverse libellé → nom interne.
 STRATEGY_LABELS = {
     "baseline":   "Ligne de base — texte libre",
     "structured": "Structuré — JSON strict (recommandé)",
@@ -46,6 +60,8 @@ STRATEGY_LABELS = {
 }
 LABEL_TO_KEY = {v: k for k, v in STRATEGY_LABELS.items()}
 
+# Feuille de style de l'interface (en-tête, panneau de gauche bleu marine,
+# bulles de discussion, une couleur par section de réponse).
 CSS = """
 .gradio-container {
     max-width: 1200px !important; margin: 0 auto !important;
@@ -174,6 +190,8 @@ footer { display: none !important; }
 .empty-txt   { font-size:0.88em;line-height:1.6; }
 """
 
+# CSS injecté directement dans la page pour forcer les couleurs
+# que le thème Gradio écrase sinon (texte blanc du panneau, menus déroulants lisibles).
 INJECTED = """<style>
 #app-header h2, #app-header p, .hdr-pill { color: white !important; }
 #app-logo { background: white !important; color: #002147 !important; }
@@ -231,6 +249,7 @@ INJECTED = """<style>
 }
 </style>"""
 
+# Bandeau du haut et message affiché avant la première question.
 HEADER = """<div id="app-header">
   <div id="app-logo">E3</div>
   <div>
@@ -246,6 +265,9 @@ EMPTY_STATE = """<div class="empty-state">
 </div>"""
 
 
+# Envoie le prompt à l'API Groq et renvoie le texte de la réponse.
+# Même logique de nouvelles tentatives que GroqModelClient (model_clients.py),
+# mais en cas d'échec définitif on renvoie un message d'erreur au lieu de planter l'interface.
 def call_groq(prompt: str, max_retries: int = 3) -> str:
     for attempt in range(max_retries):
         try:
@@ -273,6 +295,9 @@ def call_groq(prompt: str, max_retries: int = 3) -> str:
     return "Erreur : max retries atteint."
 
 
+# Transforme une réponse JSON en blocs HTML colorés, un par section.
+# html_lib.escape() neutralise les balises éventuelles dans la réponse du modèle
+# (protection contre l'injection de HTML/JavaScript dans la page).
 def _sections_html(data: dict) -> str:
     parts = []
     if v := data.get("reformulation"):
@@ -289,6 +314,9 @@ def _sections_html(data: dict) -> str:
     return "".join(parts)
 
 
+# Construit l'affichage final : bulle de la question puis réponse.
+# On tente de lire la réponse comme du JSON (brut ou dans un bloc ```json) ;
+# si ça échoue, elle est affichée en texte libre avec un badge d'avertissement.
 def format_response(raw: str, question: str) -> str:
     text = raw.strip()
     data = None
@@ -318,6 +346,8 @@ def format_response(raw: str, question: str) -> str:
     )
 
 
+# Fonction appelée au clic sur "Envoyer" : choisit la question (catalogue ou saisie),
+# remplit le prompt de la stratégie choisie, appelle le modèle et met en forme la réponse.
 def respond(question_input: str, strategy: str, use_catalog: bool, catalog_choice: str) -> str:
     if not GROQ_API_KEY:
         return '<div class="sc sc-err"><div class="sc-lbl">Erreur</div><p class="sc-txt">Clé GROQ_API_KEY manquante.</p></div>'
@@ -328,6 +358,7 @@ def respond(question_input: str, strategy: str, use_catalog: bool, catalog_choic
     return format_response(call_groq(PROMPTS[strat_key].replace("{question}", question)), question)
 
 
+# Construction de l'interface : colonne de gauche (réglages), colonne de droite (réponse).
 with gr.Blocks(title="Assistant Pédagogique — ESIEE Paris") as demo:
 
     gr.HTML(INJECTED + HEADER)
@@ -358,8 +389,11 @@ with gr.Blocks(title="Assistant Pédagogique — ESIEE Paris") as demo:
         with gr.Column(scale=2, elem_id="panel-response"):
             output = gr.HTML(value=EMPTY_STATE)
 
+# Événements : la case à cocher affiche/masque la liste du catalogue,
+# et le bouton déclenche respond() avec les valeurs des champs.
     use_catalog.change(fn=lambda v: gr.update(visible=v), inputs=use_catalog, outputs=catalog_choice)
     btn.click(respond, inputs=[question_input, strategy, use_catalog, catalog_choice], outputs=[output])
 
+# Démarre le serveur web local (par défaut http://127.0.0.1:7860).
 if __name__ == "__main__":
     demo.launch(css=CSS, theme=gr.themes.Base())
